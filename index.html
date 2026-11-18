@@ -154,6 +154,7 @@ body.pi>*:not(#invPrint){display:none!important}body.pi #invPrint{display:block!
       </div>
     </div>
     <div id="notice" class="hide alert alert-info mb-3 text-sm"></div>
+    <div id="promo" class="hide mb-3 text-sm" style="background:linear-gradient(90deg,#e03131,#f08c00);color:#fff;border-radius:14px;padding:10px 14px;font-weight:600"></div>
     <button id="reorder" class="hide btn btn-outline btn-primary btn-block mb-3" onclick="reorder()">🔁 ສັ່ງຄືເກົ່າ (ຄັ້ງທີ່ແລ້ວ)</button>
     <div class="card bg-base-100 border border-base-300 shadow-sm p-3 mb-3 gap-2" id="filt">
       <div class="flex gap-2">
@@ -586,7 +587,15 @@ const waNum = s => { let d = digits(s); if (d.startsWith('0')) d = '856' + d.sli
 
 /* ---------- ລາຄາຂັ້ນບັນໄດ (ກົດດຽວກັບ server) ---------- */
 const parseTiers = s => String(s || '').split(',').map(x => x.split(':')).map(a => ({ q: +a[0], p: +a[1] })).filter(t => t.q > 0 && t.p > 0).sort((a, b) => b.q - a.q);
-const unitPrice = (p, q) => { const t = parseTiers(p.tiers).find(t => q >= t.q); return t ? t.p : p.price; };
+/* ລາຄາໂປຣ (ກົດດຽວກັບ server): promoPrice < price ແລະ ຍັງບໍ່ເກີນ promoEnd (ຮວມວັນນັ້ນ; ວ່າງ = ບໍ່ໝົດ) */
+const todayStr = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()); };
+const promoOn = p => { const pp = +p.promoPrice || 0; if (!(pp > 0 && pp < +p.price)) return false; const e = String(p.promoEnd || '').slice(0, 10); return !e || todayStr() <= e; };
+const basePrice = p => promoOn(p) ? +p.promoPrice : p.price;
+const ddmm = s => { const a = String(s || '').slice(0, 10).split('-'); return a.length === 3 ? a[2] + '/' + a[1] : ''; };
+const unitPrice = (p, q) => { const base = basePrice(p), t = parseTiers(p.tiers).find(t => q >= t.q); return t ? Math.min(t.p, base) : base; };
+const priceHtml = (p, big) => promoOn(p)
+  ? `<div class="price"${big ? ' style="font-size:20px;margin:10px 0"' : ''}>${money(p.promoPrice)} <s class="muted" style="font-weight:400;font-size:${big ? 15 : 13}px">${money(p.price)}</s><span class="muted"> / ${esc(p.unit)}</span></div><div style="font-size:12px;margin-bottom:2px"><span style="background:#e03131;color:#fff;border-radius:999px;padding:1px 9px;font-weight:600">ຫຼຸດ ${money(p.price - p.promoPrice)}</span>${p.promoEnd ? `<span class="muted"> ເຖິງ ${ddmm(p.promoEnd)}</span>` : ''}</div>`
+  : `<div class="price"${big ? ' style="font-size:20px;margin:10px 0"' : ''}>${money(p.price)}<span class="muted"> / ${esc(p.unit)}</span></div>`;
 
 /* ---------- API (ມີໂໝດທົດລອງຖ້າບໍ່ມີ API_URL) ---------- */
 async function api(action, data = {}) {
@@ -798,6 +807,8 @@ function applyTheme() {
   $('sideName').textContent = S.shopName || ''; $('sideTag').textContent = S.tagline || '';
   document.title = S.shopName || 'ຮ້ານຄ້າອອນລາຍ';
   $('notice').textContent = S.notice || ''; $('notice').classList.toggle('hide', !S.notice);
+  const pe = String(S.promoEnd || '').slice(0, 10), showPromo = S.promoOn === '1' && S.promoText && (!pe || todayStr() <= pe) && (!S.promoGroup || P.some(p => p.group === S.promoGroup));
+  $('promo').textContent = showPromo ? '🎉 ' + (S.promoGroup ? '[' + S.promoGroup + '] ' : '') + S.promoText + (pe ? ' · ເຖິງ ' + ddmm(pe) : '') : ''; $('promo').classList.toggle('hide', !showPromo);
   const tel = digits(S.phone), wa = waNum(S.whatsapp || S.phone);
   // ປຸ່ມໂທ / WhatsApp / ຕິດຕັ້ງແອັບ ຢູ່ໃນ Sidebar ເທົ່ານັ້ນ (ບໍ່ຊ້ຳທາງລຸ່ມໜ້າ)
   $('sideFoot').innerHTML = (tel ? `<a class="btn btn-outline btn-primary btn-sm w-full justify-start gap-2" href="tel:${tel}">📞 ໂທ ${esc(S.phone)}</a>` : '') + (wa ? `<a class="btn btn-outline btn-primary btn-sm w-full justify-start gap-2" target="_blank" rel="noopener" href="https://wa.me/${wa}">💬 WhatsApp</a>` : '')
@@ -820,7 +831,7 @@ async function loadShop() {
 const pName = p => (LANG === 'th' && p.nameTh) || (LANG === 'en' && p.nameEn) || p.name;
 const pDesc = p => (LANG === 'th' && p.descTh) || (LANG === 'en' && p.descEn) || p.desc;
 const imgStyle = p => p.image ? `style="background-image:url('${esc(p.image)}')"` : '';
-const tierText = p => parseTiers(p.tiers).reverse().map(t => `ຊື້ ${t.q}+ ${esc(p.unit)} ລາຄາ ${money(t.p)}`).join(' · ');
+const tierText = p => parseTiers(p.tiers).filter(t => t.p < basePrice(p)).reverse().map(t => `ຊື້ ${t.q}+ ${esc(p.unit)} ລາຄາ ${money(t.p)}`).join(' · ');
 /* ຕົວເລືອກສິນຄ້າ (ເຊັ່ນ ສີ/ຂະໜາດ): ຮູບແບບ  ສີ:ຟ້າ|ຂາວ;ຂະໜາດ:S|M|L */
 const optGroups = p => String(p.options || '').split(';').map(g => { const i = g.indexOf(':'); return i > 0 ? { name: g.slice(0, i).trim(), vals: g.slice(i + 1).split('|').map(v => v.trim()).filter(Boolean) } : null; }).filter(g => g && g.vals.length);
 
@@ -851,10 +862,10 @@ function renderGrid() {
         <label class="btn btn-ghost bg-base-200 btn-sm" style="margin:0;cursor:pointer;color:inherit">📷 ${p.image ? 'ປ່ຽນຮູບ' : 'ເພີ່ມຮູບ'}<input type="file" accept="image/*" style="display:none" onchange="quickImg('${p.id}',this)"></label>
         <button class="btn btn-primary btn-sm" style="background:#e8590c" onclick="quickSave('${p.id}')">💾 ບັນທຶກ</button>` : `
         <div class="font-semibold leading-snug">${esc(pName(p))}</div>
-        <div class="price">${money(p.price)}<span class="muted"> / ${esc(p.unit)}</span></div>
+        ${priceHtml(p)}
         ${p.size || p.category ? `<div class="muted" style="font-size:12px">${esc([p.category, p.size].filter(Boolean).join(' · '))}</div>` : ''}
         ${pDesc(p) ? `<div class="muted" style="font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(pDesc(p))}</div>` : ''}
-        ${parseTiers(p.tiers).length ? `<div style="font-size:12px;color:#1c7a3d">💰 ${tierText(p)}</div>` : ''}
+        ${tierText(p) ? `<div style="font-size:12px;color:#1c7a3d">💰 ${tierText(p)}</div>` : ''}
         ${Number(p.deposit) > 0 ? `<div class="muted" style="font-size:12px">+ ມັດຈຳກະຕຸກ ${money(p.deposit)}</div>` : ''}
         ${p.stock < 9999 && p.stock <= (Number(S.lowStock) || 10) ? `<div style="font-size:12px;color:#d64545">ເຫຼືອ ${p.stock}</div>` : ''}`}
         <div class="mt-auto flex flex-col gap-2 pt-2">
@@ -869,9 +880,9 @@ function showDetail(id) {
   $('detailBody').innerHTML = `
     <h2>${esc(pName(p))}<button class="btn btn-ghost btn-sm btn-circle text-xl" onclick="closeM('mDetail')">×</button></h2>
     ${p.image ? `<img src="${esc(p.image)}" class="w-full aspect-square object-contain bg-base-100 rounded-xl border border-base-200 p-3">` : ''}
-    <div class="price" style="font-size:20px;margin:10px 0">${money(p.price)} <span class="muted">/ ${esc(p.unit)}</span></div>
+    ${priceHtml(p, true)}
     ${p.category || p.size ? `<p class="muted" style="margin:4px 0">${esc([p.category, p.size].filter(Boolean).join(' · '))}</p>` : ''}
-    ${parseTiers(p.tiers).length ? `<p style="color:#1c7a3d;margin:4px 0">💰 ${tierText(p)}</p>` : ''}
+    ${tierText(p) ? `<p style="color:#1c7a3d;margin:4px 0">💰 ${tierText(p)}</p>` : ''}
     <p style="white-space:pre-line">${esc(pDesc(p))}</p>
     ${og.map((g, i) => `<label>${esc(g.name)}</label><select class="select select-bordered w-full" id="opt_${i}">${g.vals.map(v => `<option>${esc(v)}</option>`).join('')}</select>`).join('')}
     ${Number(p.deposit) > 0 ? `<p class="muted">ມັດຈຳກະຕຸກ ${money(p.deposit)} / ${esc(p.unit)} (ຄືນໄດ້ເມື່ອສົ່ງກະຕຸກຄືນ · ບໍ່ເສຍຖ້າມີກະຕຸກເກົ່າແລກ)</p>` : ''}
@@ -925,7 +936,7 @@ function openCart() {
   const it = cartItems(), sub = subtotal(), min = Number(S.minOrder) || 0;
   const below = min > 0 && sub < min;
   $('cartBody').innerHTML = `<h2>🛒 ກະຕ່າສິນຄ້າ<button class="btn btn-ghost btn-sm btn-circle text-xl" onclick="closeM('mCart')">×</button></h2>` + (it.length ? `
-    ${it.map((x, i) => `<div class="ci"><div class="t">${esc(pName(x.p))}${x.opt ? `<br><span class="muted">${esc(x.opt)}</span>` : ''}<br><span class="muted">${money(x.u)}${x.u < x.p.price ? ' <span style="color:#1c7a3d">(ລາຄາຂັ້ນບັນໄດ)</span>' : ''}</span></div>
+    ${it.map((x, i) => `<div class="ci"><div class="t">${esc(pName(x.p))}${x.opt ? `<br><span class="muted">${esc(x.opt)}</span>` : ''}<br><span class="muted">${money(x.u)}${promoOn(x.p) && x.u === +x.p.promoPrice ? ` <s>${money(x.p.price)}</s> <span style="color:#e03131">(ໂປຣ)</span>` : x.u < x.p.price ? ' <span style="color:#1c7a3d">(ລາຄາຂັ້ນບັນໄດ)</span>' : ''}</span></div>
       <div class="q"><button class="btn btn-outline btn-sm btn-square" onclick="setQty(${i},-1)">−</button><b>${x.q}</b><button class="btn btn-outline btn-sm btn-square" onclick="setQty(${i},1)">+</button></div></div>`).join('')}
     <div class="line"><span>ລວມສິນຄ້າ</span><span>${money(sub)}</span></div>
     ${bottleAll() ? `<div class="line"><span>ມັດຈຳກະຕຸກ<br><span class="muted">ຄືນໄດ້ເມື່ອສົ່ງກະຕຸກຄືນ · ບໍ່ເສຍຖ້າມີກະຕຸກເກົ່າແລກ</span></span><span>${money(bottleAll())}</span></div>` : ''}
@@ -1711,6 +1722,9 @@ function renderProducts() {
         <div><label>ສະຕັອກ</label><input class="input input-bordered w-full" type="number" id="p_stock_${i}" value="${p.stock}"></div></div>
       <label>ກຸ່ມຈັດສົ່ງ / ຜູ້ຮັບຜິດຊອບ (ເຊັ່ນ ນ້ຳແພັກ ຫຼື ນ້ຳຕຸກໃຫຍ່) — ໃຊ້ແຍກອໍເດີ ແລະອີເມວແຈ້ງເຕືອນ</label><input class="input input-bordered w-full" id="p_group_${i}" list="groupList" value="${esc(p.group || '')}" placeholder="ເວັ້ນວ່າງ = ບໍ່ແຍກກຸ່ມ">
       <label>ມັດຈຳກະຕຸກຕໍ່ 1 ໜ່ວຍ (0 = ບໍ່ມີມັດຈຳ)</label><input class="input input-bordered w-full" type="number" id="p_deposit_${i}" value="${p.deposit || 0}">
+      <div class="row"><div><label>🔥 ລາຄາໂປຣ (ເວັ້ນວ່າງ = ບໍ່ມີ; ຕ້ອງຖືກກວ່າລາຄາປົກກະຕິ)</label><input class="input input-bordered w-full" type="number" id="p_promoPrice_${i}" value="${p.promoPrice || ''}" placeholder="ເຊັ່ນ 13000"></div>
+        <div><label>ໂປຣໝົດວັນທີ (ຮວມວັນນັ້ນ)</label><input class="input input-bordered w-full" type="date" id="p_promoEnd_${i}" value="${esc(String(p.promoEnd || '').slice(0, 10))}"></div></div>
+      ${+p.promoPrice > 0 && +p.promoPrice < +p.price ? `<div class="muted" style="margin-top:-2px">ລູກຄ້າເຫັນ: <s>${money(p.price)}</s> → ${money(p.promoPrice)} (ຫຼຸດ ${money(p.price - p.promoPrice)})${promoOn(p) ? '' : ' — <b style="color:#d64545">ໝົດເຂດແລ້ວ (ກັບໄປລາຄາປົກກະຕິ)</b>'}</div>` : ''}
       <label>ລາຄາຂັ້ນບັນໄດ (ເຊັ່ນ 10:14000,20:13000 = ຊື້ 10+ ລາຄາ 14000/ໜ່ວຍ, 20+ ລາຄາ 13000/ໜ່ວຍ)</label><input class="input input-bordered w-full" id="p_tiers_${i}" value="${esc(p.tiers || '')}" placeholder="ເວັ້ນວ່າງ = ບໍ່ມີ">
       <div class="row"><div><label>ໝວດໝູ່</label><input class="input input-bordered w-full" id="p_category_${i}" value="${esc(p.category || '')}" placeholder="ເຊັ່ນ ນ້ຳດື່ມ"></div><div><label>ຂະໜາດ</label><input class="input input-bordered w-full" id="p_size_${i}" value="${esc(p.size || '')}" placeholder="ເຊັ່ນ 20 ລິດ"></div></div>
       <label>ຕົວເລືອກສິນຄ້າ (ສີ/ຂະໜາດ...) ຮູບແບບ  ສີ:ຟ້າ|ຂາວ;ຂະໜາດ:S|M|L  (ເວັ້ນວ່າງ = ບໍ່ມີ)</label><input class="input input-bordered w-full" id="p_options_${i}" value="${esc(p.options || '')}">
@@ -1727,9 +1741,9 @@ function renderProducts() {
     <p class="muted">ສະຕັອກຈະຖືກຕັດອັດຕະໂນມັດເມື່ອມີອໍເດີ ແລະຄືນເມື່ອຍົກເລີກອໍເດີ. ໃສ່ 9999 ຫຼືເວັ້ນວ່າງ = ບໍ່ຈຳກັດ.</p>`;
 }
 function collectProds() {
-  A.products.forEach((p, i) => { p.name = $('p_name_' + i).value; p.price = Number($('p_price_' + i).value) || 0; p.unit = $('p_unit_' + i).value; p.stock = $('p_stock_' + i).value === '' ? 9999 : Number($('p_stock_' + i).value); p.desc = $('p_desc_' + i).value; p.deposit = Number($('p_deposit_' + i).value) || 0; p.tiers = $('p_tiers_' + i).value.trim(); p.category = $('p_category_' + i).value.trim(); p.group = $('p_group_' + i).value.trim(); p.size = $('p_size_' + i).value.trim(); p.options = $('p_options_' + i).value.trim(); p.nameTh = $('p_nameTh_' + i).value.trim(); p.nameEn = $('p_nameEn_' + i).value.trim(); p.descTh = $('p_descTh_' + i).value.trim(); p.descEn = $('p_descEn_' + i).value.trim(); p.active = $('p_active_' + i).checked; });
+  A.products.forEach((p, i) => { p.name = $('p_name_' + i).value; p.price = Number($('p_price_' + i).value) || 0; p.unit = $('p_unit_' + i).value; p.stock = $('p_stock_' + i).value === '' ? 9999 : Number($('p_stock_' + i).value); p.desc = $('p_desc_' + i).value; p.deposit = Number($('p_deposit_' + i).value) || 0; p.tiers = $('p_tiers_' + i).value.trim(); p.category = $('p_category_' + i).value.trim(); p.group = $('p_group_' + i).value.trim(); p.size = $('p_size_' + i).value.trim(); p.options = $('p_options_' + i).value.trim(); p.nameTh = $('p_nameTh_' + i).value.trim(); p.nameEn = $('p_nameEn_' + i).value.trim(); p.descTh = $('p_descTh_' + i).value.trim(); p.descEn = $('p_descEn_' + i).value.trim(); p.promoPrice = Number($('p_promoPrice_' + i).value) || 0; p.promoEnd = $('p_promoEnd_' + i).value || ''; p.active = $('p_active_' + i).checked; });
 }
-function addProd() { collectProds(); A.products.push({ id: 'p' + Date.now(), name: 'ສິນຄ້າໃໝ່', price: 0, unit: 'ອັນ', image: '', desc: '', stock: 100, deposit: 0, tiers: '', category: '', size: '', options: '', nameTh: '', nameEn: '', descTh: '', descEn: '', group: '', active: false }); renderProducts(); const nn = $('p_name_' + (A.products.length - 1)); if (nn) { nn.scrollIntoView({ block: 'center' }); nn.select(); } toast('ເພີ່ມແລ້ວ — ໃສ່ຂໍ້ມູນ + ຕິກ "ສະແດງໃນຮ້ານ" ແລ້ວກົດບັນທຶກ'); }
+function addProd() { collectProds(); A.products.push({ id: 'p' + Date.now(), name: 'ສິນຄ້າໃໝ່', price: 0, unit: 'ອັນ', image: '', desc: '', stock: 100, deposit: 0, tiers: '', category: '', size: '', options: '', nameTh: '', nameEn: '', descTh: '', descEn: '', group: '', promoPrice: 0, promoEnd: '', active: false }); renderProducts(); const nn = $('p_name_' + (A.products.length - 1)); if (nn) { nn.scrollIntoView({ block: 'center' }); nn.select(); } toast('ເພີ່ມແລ້ວ — ໃສ່ຂໍ້ມູນ + ຕິກ "ສະແດງໃນຮ້ານ" ແລ້ວກົດບັນທຶກ'); }
 function delProd(i) { if (!confirm('ລົບສິນຄ້ານີ້?')) return; collectProds(); A.products.splice(i, 1); renderProducts(); }
 async function upProd(inp, i) {
   if (!inp.files[0]) return; collectProds(); toast('ກຳລັງອັບໂຫຼດຮູບ...');
@@ -1747,6 +1761,12 @@ function renderSettings() {
     <label>ຂໍ້ຄວາມຕິດຕໍ່ (ສະແດງລຸ່ມສຸດ)</label><input class="input input-bordered w-full" id="s_contact" value="${esc(s.contact)}">
     <div class="row"><div><label>ເບີໂທຮ້ານ (ປຸ່ມໂທ)</label><input class="input input-bordered w-full" id="s_phone" type="tel" value="${esc(s.phone)}" placeholder="020 5555 5555"></div><div><label>WhatsApp (ວ່າງ = ໃຊ້ເບີໂທ)</label><input class="input input-bordered w-full" id="s_whatsapp" type="tel" value="${esc(s.whatsapp)}"></div></div>
     <label>ປະກາດ (ສະແດງເທິງສິນຄ້າ)</label><input class="input input-bordered w-full" id="s_notice" value="${esc(s.notice)}">
+    <div class="ar" style="margin-top:10px"><b>🎉 ແຖບໂປຣໂມຊັນ</b>
+      <label>ສະແດງແຖບໂປຣ</label><select class="select select-bordered w-full" id="s_promoOn"><option value="0" ${s.promoOn !== '1' ? 'selected' : ''}>ປິດ</option><option value="1" ${s.promoOn === '1' ? 'selected' : ''}>ເປີດ (ຂຶ້ນເອງຈົນຮອດວັນໝົດເຂດ)</option></select>
+      <label>ຂໍ້ຄວາມ (ເຊັ່ນ ສັ່ງ 10 ແພັກຂຶ້ນໄປ ແຖມ 1 ແພັກ)</label><input class="input input-bordered w-full" id="s_promoText" value="${esc(s.promoText || '')}">
+      <div class="row"><div><label>ໝົດວັນທີ (ຮວມວັນນັ້ນ; ວ່າງ = ບໍ່ໝົດ)</label><input class="input input-bordered w-full" type="date" id="s_promoEnd" value="${esc(String(s.promoEnd || '').slice(0, 10))}"></div>
+        <div><label>ສະເພາະກຸ່ມ (ວ່າງ = ທຸກກຸ່ມ)</label><input class="input input-bordered w-full" id="s_promoGroup" list="groupList" value="${esc(s.promoGroup || '')}" placeholder="ເຊັ່ນ ນ້ຳແພັກ"></div></div>
+      <div class="muted">ເປັນການປະກາດເທົ່ານັ້ນ — ບໍ່ຫັກເງິນ/ບໍ່ເພີ່ມສິນຄ້າແຖມໃຫ້ເອງ. ສ່ວນຫຼຸດລາຄາຕັ້ງທີ່ສິນຄ້າແຕ່ລະຕົວ (ຊ່ອງ "ລາຄາໂປຣ").</div></div>
     <label>ສີຂອງລິ້ງ / ຮ້ານ</label>
     <div class="row"><input type="color" id="s_themeColor" value="${esc(s.themeColor)}" style="height:44px;padding:2px"><div class="sw">${COLORS.map(c => `<span style="background:${c}" onclick="$('s_themeColor').value='${c}'"></span>`).join('')}</div></div>
     <label>ສະກຸນເງິນ</label><input class="input input-bordered w-full" id="s_currency" value="${esc(s.currency)}">
@@ -1819,7 +1839,7 @@ async function upLogo(inp) {
   collectSet(); renderSettings(); toast('ເລືອກໂລໂກ້ແລ້ວ — ກົດບັນທຶກ');
 }
 function resetLogo() { A.settings.logo = ''; collectSet(); renderSettings(); toast('ກົດບັນທຶກເພື່ອໃຊ້ໂລໂກ້ເດີມ'); }
-const SET_KEYS = ['payQR', 'payNote', 'groupBank', 'shopName', 'tagline', 'contact', 'phone', 'whatsapp', 'notice', 'themeColor', 'currency', 'minOrder', 'lowStock', 'bankInfo', 'slots', 'notifyEmail', 'groupEmails', 'i18nExtra'];
+const SET_KEYS = ['payQR', 'payNote', 'groupBank', 'shopName', 'tagline', 'contact', 'phone', 'whatsapp', 'notice', 'promoOn', 'promoText', 'promoEnd', 'promoGroup', 'themeColor', 'currency', 'minOrder', 'lowStock', 'bankInfo', 'slots', 'notifyEmail', 'groupEmails', 'i18nExtra'];
 function collectSet() { SET_KEYS.forEach(k => { const e = $('s_' + k); if (e) A.settings[k] = e.value; }); }
 async function saveSet() { collectSet(); const r = await api('saveSettings', { settings: A.settings }); toast(r.ok ? 'ບັນທຶກແລ້ວ ✓' : r.error); if (r.ok) { S = { ...A.settings }; applyTheme(); } }
 
